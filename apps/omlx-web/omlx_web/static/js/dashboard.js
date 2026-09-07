@@ -238,7 +238,7 @@
             // Splash launcher path row: manual entry when not detected or changed
             splashPath: { editing: false, draft: '', error: '', saving: false },
             splashOptionsError: '',
-            // Claude Desktop gateway profile state (macOS auto-config, T-002)
+            // Claude Desktop gateway profile state (macOS auto-config)
             claudeDesktop: { configured: false, working: false, message: '' },
             // Engines selectable for the DDGS Custom provider (ddgs 9.14.1 text registry)
             ddgsBackendList: ['brave', 'duckduckgo', 'grokipedia', 'mojeek', 'wikipedia', 'yahoo', 'yandex'],
