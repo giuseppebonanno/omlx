@@ -3882,6 +3882,10 @@
                 return this._launchCmd('claude');
             },
 
+            get claudeDesktopCommand() {
+                return this._launchCmd('claude_desktop');
+            },
+
             get codexCommand() {
                 return this._launchCmd('codex');
             },
