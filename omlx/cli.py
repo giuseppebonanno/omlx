@@ -417,6 +417,46 @@ def launch_command(args, extra_args: list[str] | None = None):
         first_bind if first_bind not in ("", "0.0.0.0", "::") else "127.0.0.1"
     )
 
+    # Claude Desktop resolves tier aliases server-side, so it needs no
+    # launch-time model — but it does need the desktop switch. Gate early so
+    # a declined prompt exits without touching the server or any config file.
+    if tool_name == "claude_desktop" and not bool(
+        getattr(getattr(settings, "claude_code", None), "desktop_enabled", False)
+    ):
+        if not sys.stdin.isatty():
+            print("Claude Desktop mode is not enabled in oMLX settings.")
+            print(
+                "Enable it in the oMLX dashboard (Integrations → Claude Desktop)"
+                " or re-run this command in a terminal to enable it on demand."
+            )
+            sys.exit(1)
+        answer = input("Enable Claude Desktop mode in oMLX settings? [Y/n]: ")
+        if answer.strip().lower() in ("", "y", "yes"):
+            claude_settings = getattr(settings, "claude_code", None)
+            if claude_settings is not None:
+                claude_settings.desktop_enabled = True
+            settings.save()
+            # The running server holds global settings in memory
+            # (init_server stores _server_state.global_settings in
+            # omlx/server.py, and get_claude_tier_aliases resolves from it per
+            # request); there is no settings.json file watcher, and
+            # POST /api/global-settings requires an admin session cookie
+            # (require_admin in omlx/admin/auth.py), not a Bearer API key, so
+            # a CLI file save cannot reach the live process. Persist for the
+            # next start and say so honestly.
+            print("Claude Desktop mode enabled and saved to settings.json.")
+            print(
+                "Restart the oMLX server so the running dashboard picks up "
+                "the change; the gateway files below are configured regardless."
+            )
+        else:
+            print(
+                "Claude Desktop mode not enabled — nothing to launch. Enable "
+                "it in the oMLX dashboard (Integrations → Claude Desktop) "
+                "or re-run and choose Y."
+            )
+            return
+
     # Check if oMLX server is running
     base_url = f"http://{connect_host}:{port}"
     try:
@@ -462,9 +502,12 @@ def launch_command(args, extra_args: list[str] | None = None):
         pass
 
     # Determine model. Explicit CLI tier flags bypass the picker; otherwise always
-    # prompt interactively so the user's selection is honoured.
+    # prompt interactively so the user's selection is honoured. Integrations
+    # that resolve models server-side (requires_model=False) skip this block.
     model = args.model
-    if not model and (cli_opus_model or cli_sonnet_model or cli_haiku_model):
+    if not getattr(integration, "requires_model", True):
+        model = model or ""
+    elif not model and (cli_opus_model or cli_sonnet_model or cli_haiku_model):
         model = cli_sonnet_model or cli_opus_model or cli_haiku_model or ""
     elif not model:
         # Fetch available models from server
@@ -571,7 +614,10 @@ def launch_command(args, extra_args: list[str] | None = None):
     )
 
     # Launch
-    print(f"Launching {integration.display_name} with model {model}...")
+    if not getattr(integration, "requires_model", True):
+        print(f"Launching {integration.display_name} via oMLX gateway...")
+    else:
+        print(f"Launching {integration.display_name} with model {model}...")
     integration.launch(ctx)
 
 
