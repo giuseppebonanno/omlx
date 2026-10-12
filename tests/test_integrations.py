@@ -47,7 +47,7 @@ def ctx(**overrides) -> IntegrationContext:
 class TestIntegrationRegistry:
     def test_list_integrations(self):
         integrations = list_integrations()
-        assert len(integrations) == 10
+        assert len(integrations) == 11
         names = {i.name for i in integrations}
         assert names == {
             "claude",
