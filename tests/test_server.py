@@ -1317,6 +1317,70 @@ class TestExposedProfileModels:
         assert max_context == 4096
 
 
+class TestClaudeDesktopTierAliases:
+    """Claude Desktop tier slots in /v1/models and request model resolution."""
+
+    class _FakePool:
+        def __init__(self, model_ids):
+            self._model_ids = model_ids
+
+        def get_status(self):
+            return {
+                "models": [
+                    {"id": mid, "loaded": False, "pinned": False, "model_type": "llm"}
+                    for mid in self._model_ids
+                ]
+            }
+
+        def resolve_model_id(
+            self, model_id, settings_manager=None, claude_tier_aliases=None
+        ):
+            return (claude_tier_aliases or {}).get(model_id, model_id)
+
+        def get_entry(self, model_id):
+            return None
+
+    @pytest.fixture
+    def state(self, tmp_path):
+        state = srv._server_state
+        saved = (state.engine_pool, state.settings_manager, state.global_settings)
+        gs = GlobalSettings(base_path=tmp_path)
+        gs.claude_code.opus_model = "opus-phys"
+        gs.claude_code.sonnet_model = "sonnet-phys"
+        gs.claude_code.haiku_model = "missing-phys"
+        state.global_settings = gs
+        state.settings_manager = ModelSettingsManager(tmp_path)
+        # A real model owns the sonnet slot id.
+        state.engine_pool = self._FakePool(
+            ["opus-phys", "sonnet-phys", "claude-sonnet"]
+        )
+        try:
+            yield state
+        finally:
+            state.engine_pool, state.settings_manager, state.global_settings = saved
+
+    @staticmethod
+    async def _listed():
+        response = await srv.list_models(True)
+        return {m["id"]: m for m in json.loads(bytes(response.body))["data"]}
+
+    @pytest.mark.asyncio
+    async def test_slots_follow_desktop_toggle(self, state):
+        models = await self._listed()
+        assert "claude-opus" not in models
+        assert "display_name" not in models["opus-phys"]
+        assert srv.resolve_model_id("claude-opus") == "claude-opus"
+
+        state.global_settings.claude_code.desktop_enabled = True
+        models = await self._listed()
+
+        assert models["claude-opus"]["display_name"] == "opus-phys"
+        assert models["claude-opus"]["anthropic_family_tier"] == "opus"
+        assert "display_name" not in models["claude-sonnet"]
+        assert "claude-haiku" not in models
+        assert srv.resolve_model_id("claude-opus") == "opus-phys"
+
+
 class TestHealthPreloadReadiness:
     """/health must answer 503 "loading" during the startup pinned preload
     and 200 "healthy" after, so port watchdogs see liveness instead of a

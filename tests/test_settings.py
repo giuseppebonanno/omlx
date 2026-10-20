@@ -2972,6 +2972,65 @@ class TestClaudeCodeRouteIntegration:
         assert "claude_code_opus_model" in r.model_fields_set
         assert r.claude_code_opus_model == "mlx-community/Qwen3-30B-A3B-4bit"
 
+    @pytest.mark.parametrize(
+        ("before", "after", "action"),
+        [(False, True, "configure"), (True, False, "restore"), (False, False, None)],
+    )
+    def test_desktop_toggle_writes_claude_config_on_transition(
+        self, tmp_path, monkeypatch, before, after, action
+    ):
+        import asyncio
+
+        from omlx.admin import routes as admin_routes
+        from omlx.integrations import claude_desktop
+
+        gs = GlobalSettings(base_path=tmp_path)
+        gs.claude_code.desktop_enabled = before
+        monkeypatch.setattr(admin_routes, "_get_global_settings", lambda: gs)
+        calls = []
+        monkeypatch.setattr(
+            claude_desktop,
+            "configure_omlx_gateway",
+            lambda port, api_key: calls.append("configure") or True,
+        )
+        monkeypatch.setattr(
+            claude_desktop, "restore", lambda: calls.append("restore") or True
+        )
+
+        request = admin_routes.GlobalSettingsRequest.model_validate(
+            {"claude_code_desktop_enabled": after}
+        )
+        result = asyncio.run(
+            admin_routes.update_global_settings(request=request, is_admin=True)
+        )
+
+        assert gs.claude_code.desktop_enabled is after
+        assert calls == ([action] if action else [])
+        assert result["claude_desktop"].get("action") == action
+
+    def test_desktop_restore_endpoint_clears_toggle(self, tmp_path, monkeypatch):
+        import asyncio
+
+        from omlx.admin import routes as admin_routes
+        from omlx.integrations import claude_desktop
+
+        gs = GlobalSettings(base_path=tmp_path)
+        gs.claude_code.desktop_enabled = True
+        monkeypatch.setattr(admin_routes, "_get_global_settings", lambda: gs)
+        monkeypatch.setattr(claude_desktop, "restore", lambda: True)
+        monkeypatch.setattr(claude_desktop, "is_configured", lambda: False)
+
+        result = asyncio.run(
+            admin_routes.claude_desktop_restore(
+                admin_routes.ClaudeDesktopRestoreRequest(), is_admin=True
+            )
+        )
+
+        assert result["configured"] is False
+        assert (
+            GlobalSettings.load(base_path=tmp_path).claude_code.desktop_enabled is False
+        )
+
 
 class TestCORSMiddleware:
     """Test that CORS middleware is correctly applied to the server."""
